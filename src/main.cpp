@@ -207,14 +207,18 @@ int main() {
   // Reference velocity in m/s
   double ref_velocity = 0;
 
-  // Optimal value of d in this lane => middle of the lane
-  int optimal_d = 4 * lane + 2;
-
   // Reference speed increment in m/s
-  double ref_velocity_incr = 0.1;
+  double ref_velocity_incr = 0.05;
+
+  // Min. safe distance in m, from other cars
+  int safe_dist = 30;
+
+  // Speed limit
+  int speed_limit = 22;
 
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
-    &map_waypoints_dx,&map_waypoints_dy,&lane,&ref_velocity,&ref_velocity_incr,&optimal_d]
+    &map_waypoints_dx,&map_waypoints_dy,&lane,&ref_velocity,&ref_velocity_incr,
+    &safe_dist,&speed_limit]
     (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -252,34 +256,66 @@ int main() {
           	// Sensor Fusion Data, a list of all other cars on the same side of the road.
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
-            // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
+            // Define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
             int prev_size = previous_path_x.size();
             if (prev_size > 0) {
               car_s = end_path_s;
             }
-            bool too_close = false;
+            // Check other cars around us using sensor fusion data,
+            // to determine if lane / speed should be changed
+            // Variables to check for closeness of cars
+            // in current lane, left lane, and right lane
+            bool too_close_in_current_lane = false;
+            bool too_close_in_left_lane = false;
+            bool too_close_in_right_lane = false;
             for (int i = 0; i < sensor_fusion.size(); i++) {
+              // Get the other car's location and speed
               float d = sensor_fusion[i][6];
-              // Check if this car is in our lane
-              if (d < optimal_d + 2 && d > optimal_d - 2) {
-                double vx = sensor_fusion[i][3];
-                double vy = sensor_fusion[i][4];
-                double check_speed = distance(0, 0, vx, vy);
-                // Projected s value for this car - where it will be in the future
-                double check_car_s = sensor_fusion[i][5];
-                check_car_s += prev_size * 0.02 * check_speed;
-                double s_diff = check_car_s - car_s;
-                if (s_diff > 0 && s_diff < 30) {
-                  // Reduce speed if this car is within 30m of our car
-                  // ref_velocity = 12; // m/s
-                  too_close = true;
-                  if (lane > 0) {
-                    lane -= 1;
+              double vx = sensor_fusion[i][3];
+              double vy = sensor_fusion[i][4];
+              double other_car_speed = distance(0, 0, vx, vy);
+              // Projected s value for the other car - where it will be in the future
+              double other_car_s = sensor_fusion[i][5];
+              other_car_s += prev_size * 0.02 * other_car_speed;
+              double s_diff = other_car_s - car_s;
+
+              // Check if the other car is at an unsafe distance around us
+              if (s_diff < safe_dist) {
+                // Check if the other car is ahead of us in our lane at an unsafe distance
+                if (s_diff > 0 && d > 4 * lane && d < 4 * (lane + 1)) {
+                  too_close_in_current_lane = true;
+                }
+                // Check if the other car is behind us at an unsafe distance
+                else if (s_diff > -safe_dist) {
+                  // Check if the other car is in left lane
+                  if (d > 4 * (lane - 1) && d < 4 * lane) {
+                    too_close_in_left_lane = true;
                   }
-                  else if (lane < 2) {
-                    lane += 1;
+                  // Check if the other car is in right lane
+                  else if (d > 4 * (lane + 1) && d < 4 * (lane + 2)) {
+                    too_close_in_right_lane = true;
                   }
                 }
+              }
+            }
+
+            // Variable to check if we need to reduce speed
+            bool reduce_speed = false;
+            // Check if we need to change lane
+            if (too_close_in_current_lane) {
+              // Need to change lane
+              // Check if changing lane to left lane is feasible and safe.
+              if (!too_close_in_left_lane && lane > 0) {
+                lane--;
+              }
+              // Left lane is not feasible or is unsafe
+              // Check if changing lane to right lane is feasible and safe.
+              else if (!too_close_in_right_lane && lane < 2) {
+                lane++;
+              }
+              // Cannot change lane. Just reduce speed (later)
+              else {
+                reduce_speed = true;
               }
             }
 
@@ -318,7 +354,7 @@ int main() {
             }
 
             for (int i = 1; i < 4; i++) {
-              vector<double> next_waypoint = getXY(car_s + 30 * i, 4 * lane + 2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+              vector<double> next_waypoint = getXY(car_s + 25 * i, 4 * lane + 2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
               pts_x.push_back(next_waypoint[0]);
               pts_y.push_back(next_waypoint[1]);
             }
@@ -349,7 +385,7 @@ int main() {
             }
 
             // Calculate how to space spline points so that velocity is ref_velocity
-            double target_x = 30.0;
+            double target_x = 25.0;
             double target_y = spline(target_x);
             double target_dist = distance(0, 0, target_x, target_y);
 
@@ -357,10 +393,10 @@ int main() {
 
             for (int i = 1; i <= 50 - prev_size; i++) {
               // Accelerate or decelrate avoiding jerks
-              if (too_close) {
+              if (reduce_speed) {
                 ref_velocity -= ref_velocity_incr;
               }
-              else if (ref_velocity < 22) {
+              else if (ref_velocity < speed_limit) {
                 ref_velocity += ref_velocity_incr;
               }
 
