@@ -205,19 +205,19 @@ int main() {
   int lane = 1;
 
   // Reference velocity in m/s
-  double ref_velocity = 0;
+  double ref_speed = 0;
 
   // Reference speed increment in m/s
-  double ref_velocity_incr = 0.05;
+  double ref_speed_delta = 0.1;
 
   // Min. safe distance in m, from other cars
-  int safe_dist = 30;
+  int safe_dist = 32;
 
-  // Speed limit
-  int speed_limit = 22;
+  // Speed limit in m/s
+  auto speed_limit = 22.1;
 
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
-    &map_waypoints_dx,&map_waypoints_dy,&lane,&ref_velocity,&ref_velocity_incr,
+    &map_waypoints_dx,&map_waypoints_dy,&lane,&ref_speed,&ref_speed_delta,
     &safe_dist,&speed_limit]
     (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
@@ -319,7 +319,7 @@ int main() {
               }
             }
 
-            // Create a list of widely spaced (x, y) waypoints, evenly spaced at 30m
+            // Create a list of widely spaced (x, y) waypoints
             vector<double> pts_x;
             vector<double> pts_y;
 
@@ -354,7 +354,7 @@ int main() {
             }
 
             for (int i = 1; i < 4; i++) {
-              vector<double> next_waypoint = getXY(car_s + 25 * i, 4 * lane + 2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+              vector<double> next_waypoint = getXY(car_s + safe_dist * i, 4 * lane + 2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
               pts_x.push_back(next_waypoint[0]);
               pts_y.push_back(next_waypoint[1]);
             }
@@ -373,6 +373,11 @@ int main() {
             // Set anchor points
             spline.set_points(pts_x, pts_y);
 
+            // Calculate how to space spline points so that velocity is ref_speed
+            double target_x = safe_dist;
+            double target_y = spline(target_x);
+            double target_dist = distance(0, 0, target_x, target_y);
+
             // Future path
             vector<double> next_x_vals;
           	vector<double> next_y_vals;
@@ -384,23 +389,18 @@ int main() {
                   next_y_vals.push_back(previous_path_y[i]);
             }
 
-            // Calculate how to space spline points so that velocity is ref_velocity
-            double target_x = 25.0;
-            double target_y = spline(target_x);
-            double target_dist = distance(0, 0, target_x, target_y);
-
             double x_addon = 0;
 
             for (int i = 1; i <= 50 - prev_size; i++) {
               // Accelerate or decelrate avoiding jerks
               if (reduce_speed) {
-                ref_velocity -= ref_velocity_incr;
+                ref_speed -= ref_speed_delta;
               }
-              else if (ref_velocity < speed_limit) {
-                ref_velocity += ref_velocity_incr;
+              else if (ref_speed < speed_limit) {
+                ref_speed += ref_speed_delta;
               }
 
-              double N = target_dist / (0.02 * ref_velocity);
+              double N = target_dist / (0.02 * ref_speed);
               double x = x_addon + target_x / N;
               double y = spline(x);
 

@@ -1,16 +1,41 @@
 # CarND-Path-Planning-Project
 Self-Driving Car Engineer Nanodegree Program
-   
+
 ### Simulator.
 You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
 
 ### Goals
-In this project your goal is to safely navigate around a virtual highway with other traffic that is driving +-10 MPH of the 50 MPH speed limit. You will be provided the car's localization and sensor fusion data, there is also a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too. The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another. The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop. Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
+In this project the goal is to safely navigate around a virtual highway with other traffic that is driving +-10 MPH of the 50 MPH speed limit. Car's localization and sensor fusion data is provided, there is also a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too. The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another. The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop. Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
 
 #### The map of the highway is in data/highway_map.txt
 Each waypoint in the list contains  [x,y,s,dx,dy] values. x and y are the waypoint's map coordinate position, the s value is the distance along the road to get to that waypoint in meters, the dx and dy values define the unit normal vector pointing outward of the highway loop.
 
 The highway's waypoints loop around so the frenet s value, distance along the road, goes from 0 to 6945.554.
+
+## Reflection
+
+#### Model
+I started with the basic model advised by Aaron Brown in the project Q&A video. The predicted trajectory waypoints `next_x_vals, next_y_vals` are generated as follows:
+1. Start with previous path points `previous_path_x, previous_path_y` (lines 323-354).
+2. Add 3 anchor points evenly spaced at distance = `safe_dist` m (lines 356-360).
+3. Transform all these points from map coordinates to car coordinates (lines 362-369).
+4. Generate a spline that fits all these points (lines 371-378).
+5. Add the previous path points to the predicted trajectory (lines 381-390).
+6. Add additional points along the spline to make total number of waypoints = 50 (lines 392-418). Spacing of these points is such that the car will go at desired speed (lines 403-407).
+The points are transformed back to map coordinates before adding them to the predicted trajectory waypoints (lines 412-417).
+
+#### Behavior & Path Planning
+To determine whether the car should stay in the lane, or change lane left / right, slow down or speed up, the following logic is used:
+1. Use Sensor Fusion data to determine location and speed of other cars around our car (lines 271-280).
+2. (This is the part that is an improvement over the basic model given by Aaron.) For each other car, find if it is ahead of us in the same lane or in adjacent left or right lanes, and at an unsafe distance (lines 282-300).
+3. If there is a car ahead of us at an unsafe distance, check if it's feasible and safe to change lane to the left lane (i.e. a lane in the same direction exists on the left and there is no car in that lane within an unsafe distance). If so, change lane to left. Otherwise, check if it's feasible and safe to change lane to the right. If so, change lane to right. Otherwise (if we cannot change lane), just plan to reduce speed (lines 302-320).
+4. To efficiently reduce speed, increment on decrement it based on the above determination by a small amount, while calculating the future waypoints along the spline (lines 396-401).
+
+#### Tuning parameters
+I started with values of safe distance `safe_dist` = 30 m, speed increment/decrement delta value `ref_speed_delta` = 1 m/s, and max speed `speed_limit` = 24 m/s. Testing showed that it was necessary to reduce both the max speed and the speed delta value to avoid exceeding max acceleration limit and avoid going out of lane boundaries. I experimented with various values before finally settling on `safe_dist` = 32 m, `ref_speed_delta` = 0.1 m/s, and `speed_limit` = 22.1 m/s. I kept the simulator running for a long time multiple times and didn't see any incidents for 12 miles, so this model satisfies all project rubrics. 
+
+#### Scope for improvement
+This model is simple, and does not use a cost function per se. Techniques mentioned in the lessons to evaluate many different paths and choose the best one based on minimum cost can be implemented to improve the model. Also, this model is suitable for driving on the freeway only, and needs adjustments for city driving with frequent stops.
 
 ## Basic Build Instructions
 
@@ -38,13 +63,13 @@ Here is the data provided from the Simulator to the C++ Program
 #### Previous path data given to the Planner
 
 //Note: Return the previous list but with processed points removed, can be a nice tool to show how far along
-the path has processed since last time. 
+the path has processed since last time.
 
 ["previous_path_x"] The previous list of x points previously given to the simulator
 
 ["previous_path_y"] The previous list of y points previously given to the simulator
 
-#### Previous path's end s and d values 
+#### Previous path's end s and d values
 
 ["end_path_s"] The previous list's last point's frenet s value
 
@@ -52,7 +77,7 @@ the path has processed since last time.
 
 #### Sensor Fusion Data, a list of all other car's attributes on the same side of the road. (No Noise)
 
-["sensor_fusion"] A 2d vector of cars and then that car's [car's unique ID, car's x position in map coordinates, car's y position in map coordinates, car's x velocity in m/s, car's y velocity in m/s, car's s position in frenet coordinates, car's d position in frenet coordinates. 
+["sensor_fusion"] A 2d vector of cars and then that car's [car's unique ID, car's x position in map coordinates, car's y position in map coordinates, car's x velocity in m/s, car's y velocity in m/s, car's s position in frenet coordinates, car's d position in frenet coordinates.
 
 ## Details
 
@@ -82,7 +107,7 @@ A really helpful resource for doing this project and creating smooth trajectorie
   * Run either `install-mac.sh` or `install-ubuntu.sh`.
   * If you install from source, checkout to commit `e94b6e1`, i.e.
     ```
-    git clone https://github.com/uWebSockets/uWebSockets 
+    git clone https://github.com/uWebSockets/uWebSockets
     cd uWebSockets
     git checkout e94b6e1
     ```
@@ -134,7 +159,3 @@ that's just a guess.
 
 One last note here: regardless of the IDE used, every submitted project must
 still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
-
